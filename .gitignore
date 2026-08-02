@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Local configuration and calibration
+.env
+config.local.json
+camera_matrix.npy
+dist_coeffs.npy
+
+# Runtime outputs
+outputs/*
+!outputs/.gitkeep
+
+# Generated demo frames
+samples/raw_laser_demo/*
+!samples/raw_laser_demo/.gitkeep
+
+# Packaging
+*.zip
+build/
+dist/
