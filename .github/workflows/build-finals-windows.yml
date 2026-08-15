@@ -33,7 +33,7 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path finals_assets/demo_backup | Out-Null
-          Copy-Item samples/raw_laser_demo/* finals_assets/demo_backup/ -Force
+          Copy-Item samples/raw_laser_demo/frame_*.* finals_assets/demo_backup/ -Force
 
       - name: Build no-console onedir package
         shell: pwsh
@@ -53,8 +53,10 @@ jobs:
         run: |
           $exe = 'dist/槽型深度宽度测量软件/槽型深度宽度测量软件.exe'
           if (-not (Test-Path $exe)) { throw "Finals exe not found: $exe" }
-          $count = (Get-ChildItem 'dist/槽型深度宽度测量软件/samples/raw_laser_demo' -File).Count
+          $count = (Get-ChildItem 'dist/槽型深度宽度测量软件/samples/raw_laser_demo' -File -Filter 'frame_*.*').Count
           if ($count -ne 31) { throw "Expected 31 demo frames, got $count" }
+          $backupCount = (Get-ChildItem 'dist/槽型深度宽度测量软件/finals_assets/demo_backup' -File -Filter 'frame_*.*').Count
+          if ($backupCount -ne 31) { throw "Expected 31 backup frames, got $backupCount" }
 
       - name: Archive delivery folder
         shell: pwsh
