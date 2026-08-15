@@ -2,6 +2,9 @@ name: Build Windows Package
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - release/finals-v1.0
 
 jobs:
   build-windows:
