@@ -1,4 +1,4 @@
-name: Build Finals Windows Package
+name: Build Windows Package
 
 on:
   workflow_dispatch:
@@ -25,46 +25,49 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt pyinstaller
 
-      - name: Run Stage5 validation
+      - name: Run software validation
         shell: pwsh
         run: python validate_stage5.py
 
-      - name: Prepare shipped demo backup
+      - name: Prepare standard sample backup
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force -Path finals_assets/demo_backup | Out-Null
-          Copy-Item samples/raw_laser_demo/frame_*.* finals_assets/demo_backup/ -Force
+          New-Item -ItemType Directory -Force -Path assets/standard_sample_backup | Out-Null
+          Copy-Item samples/raw_laser_demo/frame_*.* assets/standard_sample_backup/ -Force
 
-      - name: Build no-console onedir package
+      - name: Build no-console Windows package
         shell: pwsh
         run: python -m PyInstaller --clean --noconfirm finals.spec
 
-      - name: Add delivery documents and fixed dataset
+      - name: Add software guide and data
         shell: pwsh
         run: |
           $dst = 'dist/槽型深度宽度测量软件'
-          Copy-Item README_FINALS.md "$dst/请先看我.txt" -Force
-          Copy-Item docs "$dst/docs" -Recurse -Force
+          Copy-Item README_FINALS.md "$dst/使用说明.txt" -Force
           Copy-Item samples "$dst/samples" -Recurse -Force
-          Copy-Item finals_assets "$dst/finals_assets" -Recurse -Force
+          Copy-Item assets "$dst/assets" -Recurse -Force
+          New-Item -ItemType Directory -Force -Path "$dst/docs" | Out-Null
+          Copy-Item docs/ARCHITECTURE.md "$dst/docs/软件架构.md" -Force
+          Copy-Item docs/DATA_FORMAT.md "$dst/docs/数据格式.md" -Force
+          Copy-Item docs/VALIDATION_PLAN.md "$dst/docs/验证方案.md" -Force
 
-      - name: Smoke-check package layout
+      - name: Check package layout
         shell: pwsh
         run: |
           $exe = 'dist/槽型深度宽度测量软件/槽型深度宽度测量软件.exe'
-          if (-not (Test-Path $exe)) { throw "Finals exe not found: $exe" }
+          if (-not (Test-Path $exe)) { throw "Application exe not found: $exe" }
           $count = (Get-ChildItem 'dist/槽型深度宽度测量软件/samples/raw_laser_demo' -File -Filter 'frame_*.*').Count
-          if ($count -ne 31) { throw "Expected 31 demo frames, got $count" }
-          $backupCount = (Get-ChildItem 'dist/槽型深度宽度测量软件/finals_assets/demo_backup' -File -Filter 'frame_*.*').Count
+          if ($count -ne 31) { throw "Expected 31 sample frames, got $count" }
+          $backupCount = (Get-ChildItem 'dist/槽型深度宽度测量软件/assets/standard_sample_backup' -File -Filter 'frame_*.*').Count
           if ($backupCount -ne 31) { throw "Expected 31 backup frames, got $backupCount" }
 
-      - name: Archive delivery folder
+      - name: Archive Windows package
         shell: pwsh
-        run: Compress-Archive -Path 'dist/槽型深度宽度测量软件' -DestinationPath '槽型深度宽度测量软件_Finals_v1.0_Windows.zip' -Force
+        run: Compress-Archive -Path 'dist/槽型深度宽度测量软件' -DestinationPath '槽型深度宽度测量软件_v1.0_Windows.zip' -Force
 
-      - name: Upload finals package
+      - name: Upload Windows package
         uses: actions/upload-artifact@v4
         with:
-          name: groove-depth-width-finals-v1.0-windows
-          path: 槽型深度宽度测量软件_Finals_v1.0_Windows.zip
+          name: groove-depth-width-measurement-software-v1.0-windows
+          path: 槽型深度宽度测量软件_v1.0_Windows.zip
           retention-days: 30
