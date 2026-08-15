@@ -2,24 +2,30 @@
 from __future__ import annotations
 
 import logging
+import os
 import shutil
 import sys
 import traceback
+from datetime import datetime
 from pathlib import Path
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QApplication,
     QDialog,
+    QFileDialog,
     QGridLayout,
     QLabel,
     QMessageBox,
     QPushButton,
+    QTextEdit,
     QVBoxLayout,
     QWidget,
 )
 
 from demo_data import ensure_demo_frames
+from measurement_analysis import analyze_groove
+from offline_reconstruction import reconstruct_directory
 import gui as base_gui
 
 APP_ROOT = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent
@@ -125,13 +131,28 @@ def restore_standard_sample() -> tuple[bool, str]:
         return False, str(exc)
 
 
+def process_image_directory(window: MainWindow, directory: Path, label: str = "图像数据") -> None:
+    session = OUTPUT_ROOT / "offline_reconstruction" / f"{window.task.sample_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    window.log(f"开始处理{label}……")
+    window.reconstruction = reconstruct_directory(directory, session)
+    window.points = window.reconstruction["points"]
+    window.result = analyze_groove(window.points)
+    window.render_points()
+    window.update_images()
+    window.update_results()
+    window.log(
+        f"处理完成：{window.reconstruction['valid_frames']}/{window.reconstruction['original_frames']} 帧有效，"
+        f"点云 {window.reconstruction['point_count']} 点。"
+    )
+
+
 def run_standard_sample(window: MainWindow) -> None:
     try:
         if window.data_nature.count() > 0:
             window.data_nature.setCurrentIndex(0)
         window.apply_task()
         sample_dir = ensure_demo_frames(SAMPLE_DIR, frame_count=31)
-        window._run_image_directory(sample_dir)
+        process_image_directory(window, sample_dir, "标准样例")
     except Exception:
         logging.exception("Standard sample measurement failed")
         QMessageBox.critical(
@@ -139,6 +160,115 @@ def run_standard_sample(window: MainWindow) -> None:
             "样例测量未完成",
             "标准样例测量未能完成。请执行“系统检测”或“恢复标准样例”后重试。",
         )
+
+
+def import_point_cloud_product(window: MainWindow) -> None:
+    filename, _ = QFileDialog.getOpenFileName(window, "导入点云文件", str(APP_ROOT), "Point Cloud (*.csv *.ply *.pcd *.xyz)")
+    if not filename:
+        return
+    try:
+        window.apply_task()
+        window.data_nature.setCurrentText("外部点云")
+        window.points = base_gui.load_point_cloud(Path(filename))
+        window.reconstruction = {
+            "points": window.points,
+            "source_dir": str(Path(filename).parent),
+            "point_cloud_csv": filename,
+            "original_frames": 0,
+            "valid_frames": 0,
+            "point_count": int(window.points.shape[0]),
+            "read_seconds": 0.0,
+            "calibration_applied": False,
+            "preview_original": "",
+            "preview_overlay": "",
+            "preview_mask": "",
+        }
+        window.result = analyze_groove(window.points)
+        window.render_points()
+        window.update_results()
+        window.log(f"点云导入完成，共 {window.points.shape[0]} 点。")
+    except Exception:
+        logging.exception("Point cloud import failed")
+        QMessageBox.critical(window, "导入失败", "点云文件无法读取，请检查文件格式。")
+
+
+def analyze_current_product(window: MainWindow) -> None:
+    if window.points is None:
+        QMessageBox.information(window, "提示", "请先加载标准样例、原始图像或外部点云。")
+        return
+    window.analyze_current()
+
+
+def generate_report_product(window: MainWindow) -> None:
+    if not window.task or not window.reconstruction or not window.result:
+        QMessageBox.information(window, "提示", "请先完成一次测量分析。")
+        return
+    report_dir = OUTPUT_ROOT / "reports" / datetime.now().strftime("%Y-%m-%d")
+    report_path = report_dir / f"{window.task.sample_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}_measurement_report.pdf"
+    try:
+        window.last_report, report_seconds = base_gui.generate_measurement_report(
+            window.task, window.reconstruction, window.result, report_path
+        )
+        depth_status = "合格" if abs(window.result.depth_mean - window.task.target_depth_mm) <= window.task.tolerance_mm else "超差"
+        width_status = "合格" if abs(window.result.width_mean - window.task.target_width_mm) <= window.task.tolerance_mm else "超差"
+        base_gui.append_history(base_gui.HISTORY_PATH, {
+            "sample_id": window.task.sample_id,
+            "groove_type": window.task.groove_type,
+            "data_nature": window.task.data_nature,
+            "target_depth_mm": window.task.target_depth_mm,
+            "measured_depth_mm": window.result.depth_mean,
+            "target_width_mm": window.task.target_width_mm,
+            "measured_width_mm": window.result.width_mean,
+            "tolerance_mm": window.task.tolerance_mm,
+            "depth_status": depth_status,
+            "width_status": width_status,
+            "point_count": window.reconstruction.get("point_count", 0),
+            "valid_sections": len(window.result.sections),
+            "read_seconds": window.reconstruction.get("read_seconds", 0),
+            "analysis_seconds": window.result.analysis_seconds,
+            "report_seconds": report_seconds,
+            "report_path": str(window.last_report),
+        })
+        window.log("PDF 测量报告已生成。")
+        QMessageBox.information(window, "报告生成成功", "测量报告已生成并保存至输出结果目录。")
+    except Exception:
+        logging.exception("Report generation failed")
+        QMessageBox.critical(window, "报告生成失败", "报告生成未完成，请稍后重试。")
+
+
+def show_history_product(window: MainWindow) -> None:
+    rows = base_gui.read_recent_history(base_gui.HISTORY_PATH, limit=20)
+    dialog = QDialog(window)
+    dialog.setWindowTitle("最近测量历史")
+    dialog.resize(900, 500)
+    layout = QVBoxLayout(dialog)
+    text = QTextEdit()
+    text.setReadOnly(True)
+    if rows:
+        lines = []
+        for row in reversed(rows):
+            lines.append(
+                f"{row.get('timestamp')} | {row.get('sample_id')} | "
+                f"槽深 {row.get('measured_depth_mm')} mm（{row.get('depth_status')}） | "
+                f"槽宽 {row.get('measured_width_mm')} mm（{row.get('width_status')}）"
+            )
+        text.setPlainText("\n".join(lines))
+    else:
+        text.setPlainText("暂无历史记录。完成测量并生成报告后自动写入。")
+    layout.addWidget(text)
+    dialog.exec()
+
+
+def open_output_folder_product(window: MainWindow) -> None:
+    OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
+    try:
+        if hasattr(os, "startfile"):
+            os.startfile(str(OUTPUT_ROOT))
+        else:
+            QMessageBox.information(window, "输出结果", "输出文件保存在软件目录下的 outputs 文件夹。")
+    except Exception:
+        logging.exception("Open output folder failed")
+        QMessageBox.information(window, "输出结果", "输出文件保存在软件目录下的 outputs 文件夹。")
 
 
 def configure_product_main_window(window: MainWindow) -> None:
@@ -149,14 +279,26 @@ def configure_product_main_window(window: MainWindow) -> None:
         window.data_nature.setCurrentIndex(0)
     window.notes.setText("标准样例测量")
 
+    # Replace the original image-processing method so logs remain concise and product-facing.
+    window._run_image_directory = lambda directory: process_image_directory(window, Path(directory), "图像数据")
+
+    button_actions = {
+        "运行内置演示": ("标准样例测量", lambda: run_standard_sample(window)),
+        "导入点云文件": ("导入点云文件", lambda: import_point_cloud_product(window)),
+        "重新分析当前点云": ("重新分析当前点云", lambda: analyze_current_product(window)),
+        "生成 PDF 报告": ("生成 PDF 报告", lambda: generate_report_product(window)),
+        "查看历史记录": ("查看历史记录", lambda: show_history_product(window)),
+        "显示输出目录": ("打开输出结果", lambda: open_output_folder_product(window)),
+    }
     for button in window.findChildren(QPushButton):
-        if button.text() == "运行内置演示":
-            button.setText("标准样例测量")
+        if button.text() in button_actions:
+            new_text, action = button_actions[button.text()]
+            button.setText(new_text)
             try:
                 button.clicked.disconnect()
             except (TypeError, RuntimeError):
                 pass
-            button.clicked.connect(lambda checked=False: run_standard_sample(window))
+            button.clicked.connect(lambda checked=False, fn=action: fn())
 
     for label in window.findChildren(QLabel):
         if label.text() == "运行演示或导入图片后显示":
