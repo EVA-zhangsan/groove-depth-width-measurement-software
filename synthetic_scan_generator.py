@@ -109,7 +109,7 @@ def main() -> int:
     parser.add_argument("--frames", type=int, default=61)
     args = parser.parse_args()
     generate_complex_scan_sequence(args.output, frame_count=args.frames)
-    print(f"generated {args.frames} frames -> {args.output}")
+    print(f"generated {args.frames} frames")
     return 0
 
 
