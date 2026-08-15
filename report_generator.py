@@ -1,6 +1,7 @@
 """PDF report generation for one measurement task."""
 from __future__ import annotations
 
+import os
 from datetime import datetime
 from pathlib import Path
 from time import perf_counter
@@ -15,11 +16,43 @@ from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.cidfonts import UnicodeCIDFont
+from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import Image, PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+
+
+APP_FONT_NAME = "GrooveMeasureChinese"
 
 
 def _status(value: float, target: float, tolerance: float) -> str:
     return "合格" if abs(value - target) <= tolerance else "超差"
+
+
+def _register_chinese_font() -> str:
+    if APP_FONT_NAME in pdfmetrics.getRegisteredFontNames():
+        return APP_FONT_NAME
+
+    windir = Path(os.environ.get("WINDIR", r"C:\Windows"))
+    candidates = [
+        windir / "Fonts" / "simhei.ttf",
+        windir / "Fonts" / "Deng.ttf",
+        windir / "Fonts" / "Dengb.ttf",
+        windir / "Fonts" / "msyh.ttc",
+        windir / "Fonts" / "simsun.ttc",
+        Path("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"),
+        Path("/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc"),
+    ]
+    for font_path in candidates:
+        if not font_path.exists():
+            continue
+        try:
+            pdfmetrics.registerFont(TTFont(APP_FONT_NAME, str(font_path)))
+            return APP_FONT_NAME
+        except Exception:
+            continue
+
+    if "STSong-Light" not in pdfmetrics.getRegisteredFontNames():
+        pdfmetrics.registerFont(UnicodeCIDFont("STSong-Light"))
+    return "STSong-Light"
 
 
 def generate_measurement_report(task, reconstruction: dict, result, output_path: str | Path) -> tuple[Path, float]:
@@ -44,11 +77,12 @@ def generate_measurement_report(task, reconstruction: dict, result, output_path:
     fig.savefig(chart_path, dpi=160)
     plt.close(fig)
 
-    pdfmetrics.registerFont(UnicodeCIDFont("STSong-Light"))
+    font_name = _register_chinese_font()
     styles = getSampleStyleSheet()
-    title_style = ParagraphStyle("ChineseTitle", parent=styles["Title"], fontName="STSong-Light", fontSize=20, leading=26, alignment=TA_CENTER)
-    h_style = ParagraphStyle("ChineseHeading", parent=styles["Heading2"], fontName="STSong-Light", fontSize=13, leading=18)
-    body_style = ParagraphStyle("ChineseBody", parent=styles["BodyText"], fontName="STSong-Light", fontSize=9.5, leading=15)
+    title_style = ParagraphStyle("ChineseTitle", parent=styles["Title"], fontName=font_name, fontSize=20, leading=26, alignment=TA_CENTER)
+    h_style = ParagraphStyle("ChineseHeading", parent=styles["Heading2"], fontName=font_name, fontSize=13, leading=18)
+    body_style = ParagraphStyle("ChineseBody", parent=styles["BodyText"], fontName=font_name, fontSize=9.5, leading=15)
+    note_style = ParagraphStyle("ChineseNote", parent=body_style, fontSize=8.8, leading=14, textColor=colors.HexColor("#44515c"))
 
     doc = SimpleDocTemplate(str(output_path), pagesize=A4, rightMargin=18 * mm, leftMargin=18 * mm, topMargin=16 * mm, bottomMargin=16 * mm)
     story = [
@@ -67,7 +101,7 @@ def generate_measurement_report(task, reconstruction: dict, result, output_path:
     ]
     task_table = Table(task_data, colWidths=[30 * mm, 55 * mm, 30 * mm, 55 * mm])
     task_table.setStyle(TableStyle([
-        ("FONTNAME", (0, 0), (-1, -1), "STSong-Light"), ("FONTSIZE", (0, 0), (-1, -1), 8.5),
+        ("FONTNAME", (0, 0), (-1, -1), font_name), ("FONTSIZE", (0, 0), (-1, -1), 8.5),
         ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#9aa4ad")),
         ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#e9eef3")),
         ("BACKGROUND", (2, 0), (2, -1), colors.HexColor("#e9eef3")),
@@ -83,7 +117,7 @@ def generate_measurement_report(task, reconstruction: dict, result, output_path:
     ]
     process_table = Table(process_data, colWidths=[35 * mm, 45 * mm, 35 * mm, 55 * mm])
     process_table.setStyle(TableStyle([
-        ("FONTNAME", (0, 0), (-1, -1), "STSong-Light"), ("FONTSIZE", (0, 0), (-1, -1), 8.5),
+        ("FONTNAME", (0, 0), (-1, -1), font_name), ("FONTSIZE", (0, 0), (-1, -1), 8.5),
         ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#9aa4ad")),
         ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#e9eef3")),
         ("BACKGROUND", (2, 0), (2, -1), colors.HexColor("#e9eef3")),
@@ -94,13 +128,13 @@ def generate_measurement_report(task, reconstruction: dict, result, output_path:
     depth_status = _status(result.depth_mean, task.target_depth_mm, task.tolerance_mm)
     width_status = _status(result.width_mean, task.target_width_mm, task.tolerance_mm)
     result_data = [
-        ["指标", "标准值/mm", "测量均值/mm", "最小值/mm", "最大值/mm", "标准差/mm", "判定"],
+        ["指标", "标准值/mm", "测量均值/mm", "最小值/mm", "最大值/mm", "标准差/mm", "均值判定"],
         ["槽深", f"{task.target_depth_mm:.4f}", f"{result.depth_mean:.4f}", f"{result.depth_min:.4f}", f"{result.depth_max:.4f}", f"{result.depth_std:.4f}", depth_status],
         ["槽宽", f"{task.target_width_mm:.4f}", f"{result.width_mean:.4f}", f"{result.width_min:.4f}", f"{result.width_max:.4f}", f"{result.width_std:.4f}", width_status],
     ]
     result_table = Table(result_data, colWidths=[22 * mm, 25 * mm, 27 * mm, 24 * mm, 24 * mm, 24 * mm, 20 * mm])
     result_table.setStyle(TableStyle([
-        ("FONTNAME", (0, 0), (-1, -1), "STSong-Light"), ("FONTSIZE", (0, 0), (-1, -1), 8),
+        ("FONTNAME", (0, 0), (-1, -1), font_name), ("FONTSIZE", (0, 0), (-1, -1), 8),
         ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#9aa4ad")),
         ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#dce7f1")),
         ("ALIGN", (1, 0), (-1, -1), "CENTER"), ("PADDING", (0, 0), (-1, -1), 4),
@@ -108,7 +142,7 @@ def generate_measurement_report(task, reconstruction: dict, result, output_path:
     story += [result_table, Spacer(1, 4 * mm)]
     story += [Paragraph(f"槽深最小值位置：Y={result.depth_min_y:.3f} mm；槽深最大值位置：Y={result.depth_max_y:.3f} mm。", body_style)]
     story += [Paragraph(f"槽宽最小值位置：Y={result.width_min_y:.3f} mm；槽宽最大值位置：Y={result.width_max_y:.3f} mm。", body_style)]
-    story += [Spacer(1, 4 * mm), Image(str(chart_path), width=170 * mm, height=79 * mm)]
+    story += [Spacer(1, 2 * mm), Paragraph("判定口径：均值判定以多截面测量均值与任务标准值的偏差是否超过允许误差为依据；最小值、最大值及其位置用于描述局部波动，不直接参与均值判定。", note_style), Spacer(1, 3 * mm), Image(str(chart_path), width=170 * mm, height=79 * mm)]
 
     preview_paths = [
         ("原始激光图像", reconstruction.get("preview_original")),
@@ -127,7 +161,7 @@ def generate_measurement_report(task, reconstruction: dict, result, output_path:
         image_table.setStyle(TableStyle([("ALIGN", (0, 0), (-1, -1), "CENTER"), ("VALIGN", (0, 0), (-1, -1), "MIDDLE")]))
         story.append(image_table)
 
-    story += [Spacer(1, 6 * mm), Paragraph("说明：公差判定依据当前任务设置完成。内置演示数据用于验证软件闭环；实际计量精度需结合正式标定参数和参考样本复核。", body_style)]
+    story += [Spacer(1, 6 * mm), Paragraph("说明：本报告基于当前导入数据和任务参数生成。实际计量应用需结合正式标定参数、参考样本及重复性验证对测量结果进行复核。", note_style)]
     doc.build(story)
     chart_path.unlink(missing_ok=True)
     return output_path, perf_counter() - start
