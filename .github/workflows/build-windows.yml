@@ -1,0 +1,56 @@
+name: Build Windows Package
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      - name: Install dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt pyinstaller
+      - name: Run software validation
+        shell: pwsh
+        run: python validate_stage5.py
+      - name: Prepare built-in sample backup
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path assets/builtin_sample_backup | Out-Null
+          Copy-Item samples/raw_laser_demo/frame_*.* assets/builtin_sample_backup/ -Force
+      - name: Build no-console Windows package
+        shell: pwsh
+        run: python -m PyInstaller --clean --noconfirm product.spec
+      - name: Add software guide and data
+        shell: pwsh
+        run: |
+          $dst = 'dist/槽型深度宽度测量软件'
+          Copy-Item SOFTWARE_GUIDE.md "$dst/使用说明.txt" -Force
+          Copy-Item samples "$dst/samples" -Recurse -Force
+          Copy-Item assets "$dst/assets" -Recurse -Force
+      - name: Check package layout
+        shell: pwsh
+        run: |
+          $exe = 'dist/槽型深度宽度测量软件/槽型深度宽度测量软件.exe'
+          if (-not (Test-Path $exe)) { throw "Application exe not found: $exe" }
+          $sampleCount = (Get-ChildItem 'dist/槽型深度宽度测量软件/samples/raw_laser_demo' -File -Filter 'frame_*.*').Count
+          $backupCount = (Get-ChildItem 'dist/槽型深度宽度测量软件/assets/builtin_sample_backup' -File -Filter 'frame_*.*').Count
+          if ($sampleCount -lt 1) { throw "Built-in sample is empty" }
+          if ($sampleCount -ne $backupCount) { throw "Built-in sample and backup are inconsistent" }
+      - name: Archive Windows package
+        shell: pwsh
+        run: Compress-Archive -Path 'dist/槽型深度宽度测量软件' -DestinationPath '槽型深度宽度测量软件_v1.0_Windows.zip' -Force
+      - name: Upload Windows package
+        uses: actions/upload-artifact@v4
+        with:
+          name: groove-depth-width-measurement-software-v1.0-windows
+          path: 槽型深度宽度测量软件_v1.0_Windows.zip
+          retention-days: 30
