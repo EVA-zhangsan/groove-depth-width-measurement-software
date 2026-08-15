@@ -40,25 +40,13 @@ MainWindow = base_gui.MainWindow
 
 def configure_logging() -> None:
     LOG_DIR.mkdir(parents=True, exist_ok=True)
-    logging.basicConfig(
-        filename=str(LOG_FILE),
-        level=logging.INFO,
-        format="%(asctime)s | %(levelname)s | %(message)s",
-        encoding="utf-8",
-    )
+    logging.basicConfig(filename=str(LOG_FILE), level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s", encoding="utf-8")
 
 
 def exception_hook(exc_type, exc_value, exc_tb) -> None:
-    logging.critical(
-        "Unhandled exception\n%s",
-        "".join(traceback.format_exception(exc_type, exc_value, exc_tb)),
-    )
+    logging.critical("Unhandled exception\n%s", "".join(traceback.format_exception(exc_type, exc_value, exc_tb)))
     if QApplication.instance() is not None:
-        QMessageBox.critical(
-            None,
-            "软件运行异常",
-            "软件运行过程中出现异常。请重新启动软件；如问题出现在数据导入阶段，请检查数据格式。",
-        )
+        QMessageBox.critical(None, "软件运行异常", "软件运行过程中出现异常。请重新启动软件；如问题出现在数据导入阶段，请检查数据格式。")
 
 
 def process_image_directory(window: MainWindow, directory: Path) -> None:
@@ -70,10 +58,7 @@ def process_image_directory(window: MainWindow, directory: Path) -> None:
     window.render_points()
     window.update_images()
     window.update_results()
-    window.log(
-        f"处理完成：{window.reconstruction['valid_frames']}/{window.reconstruction['original_frames']} 帧有效，"
-        f"点云 {window.reconstruction['point_count']} 点。"
-    )
+    window.log(f"处理完成：{window.reconstruction['valid_frames']}/{window.reconstruction['original_frames']} 帧有效，点云 {window.reconstruction['point_count']} 点。")
 
 
 def import_image_sequence(window: MainWindow) -> None:
@@ -87,21 +72,12 @@ def import_image_sequence(window: MainWindow) -> None:
         process_image_directory(window, Path(directory))
     except Exception:
         logging.exception("Image sequence import failed")
-        QMessageBox.critical(
-            window,
-            "图像序列处理失败",
-            "所选图像序列未能完成处理，请检查图像格式与数据完整性。",
-        )
+        QMessageBox.critical(window, "图像序列处理失败", "所选图像序列未能完成处理，请检查图像格式与数据完整性。")
 
 
 def import_point_cloud(window: MainWindow) -> None:
     start_dir = DATA_ROOT if DATA_ROOT.exists() else APP_ROOT
-    filename, _ = QFileDialog.getOpenFileName(
-        window,
-        "导入点云文件",
-        str(start_dir),
-        "Point Cloud (*.csv *.ply *.pcd *.xyz)",
-    )
+    filename, _ = QFileDialog.getOpenFileName(window, "导入点云文件", str(start_dir), "Point Cloud (*.csv *.ply *.pcd *.xyz)")
     if not filename:
         return
     try:
@@ -152,12 +128,7 @@ def generate_report(window: MainWindow) -> None:
     report_dir = OUTPUT_ROOT / "reports" / datetime.now().strftime("%Y-%m-%d")
     report_path = report_dir / f"{window.task.sample_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}_measurement_report.pdf"
     try:
-        window.last_report, report_seconds = generate_measurement_report(
-            window.task,
-            window.reconstruction,
-            window.result,
-            report_path,
-        )
+        window.last_report, report_seconds = generate_measurement_report(window.task, window.reconstruction, window.result, report_path)
         depth_status = "合格" if abs(window.result.depth_mean - window.task.target_depth_mm) <= window.task.tolerance_mm else "超差"
         width_status = "合格" if abs(window.result.width_mean - window.task.target_width_mm) <= window.task.tolerance_mm else "超差"
         append_history(HISTORY_PATH, {
@@ -195,9 +166,7 @@ def show_history(window: MainWindow) -> None:
     text.setReadOnly(True)
     if rows:
         text.setPlainText("\n".join(
-            f"{row.get('timestamp')} | {row.get('sample_id')} | "
-            f"槽深 {row.get('measured_depth_mm')} mm（{row.get('depth_status')}） | "
-            f"槽宽 {row.get('measured_width_mm')} mm（{row.get('width_status')}）"
+            f"{row.get('timestamp')} | {row.get('sample_id')} | 槽深均值 {row.get('measured_depth_mm')} mm（{row.get('depth_status')}） | 槽宽均值 {row.get('measured_width_mm')} mm（{row.get('width_status')}）"
             for row in reversed(rows)
         ))
     else:
@@ -226,7 +195,6 @@ def configure_main_window(window: MainWindow) -> None:
     window.data_nature.clear()
     window.data_nature.addItems(["图像序列数据", "外部点云"])
     window.data_nature.setCurrentIndex(0)
-
     window._run_image_directory = lambda directory: process_image_directory(window, Path(directory))
 
     for button in window.findChildren(QPushButton):
@@ -274,8 +242,13 @@ def configure_main_window(window: MainWindow) -> None:
             button.clicked.connect(lambda checked=False: open_output_folder(window))
 
     for label in window.findChildren(QLabel):
-        if label.text() == "运行演示或导入图片后显示":
+        text = label.text()
+        if text == "运行演示或导入图片后显示":
             label.setText("导入图像序列后显示")
+        elif text == "槽深判定":
+            label.setText("槽深均值判定")
+        elif text == "槽宽判定":
+            label.setText("槽宽均值判定")
 
     window.console.clear()
     window.apply_task()
@@ -286,7 +259,6 @@ def main() -> int:
     configure_logging()
     sys.excepthook = exception_hook
     OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
-
     app = QApplication(sys.argv)
     app.setApplicationName("槽型深度宽度测量软件")
     window = MainWindow()
