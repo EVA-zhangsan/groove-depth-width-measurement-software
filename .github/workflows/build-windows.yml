@@ -60,14 +60,15 @@ jobs:
           New-Item -ItemType Directory -Force -Path "$dst/data/测试数据_B_基础工况" | Out-Null
           Copy-Item samples/raw_laser_demo/frame_*.* "$dst/data/测试数据_B_基础工况/" -Force
 
-          @'
-数据说明
-
-测试数据_A_复杂工况：61 帧结构光软件测试图像。包含背景噪声、光强波动、条纹轻微抖动、槽位置漂移和公差范围内的尺寸微扰，用于验证图像处理、三维重建与槽型分析的稳定性。
-测试数据_B_基础工况：基础软件测试图像，用于快速流程复核与备用。
-
-两组数据均属于软件测试数据，不作为真实硬件计量精度认证依据。实际测量时可通过“导入图像序列”选择设备采集的连续原始图像，帧数由实际扫描数据决定。
-'@ | Set-Content -Path "$dst/data/数据说明.txt" -Encoding UTF8
+          $lines = @(
+            '数据说明',
+            '',
+            '测试数据_A_复杂工况：61 帧结构光软件测试图像。包含背景噪声、光强波动、条纹轻微抖动、槽位置漂移和公差范围内的尺寸微扰，用于验证图像处理、三维重建与槽型分析的稳定性。',
+            '测试数据_B_基础工况：基础软件测试图像，用于快速流程复核与备用。',
+            '',
+            '两组数据均属于软件测试数据，不作为真实硬件计量精度认证依据。实际测量时可通过“导入图像序列”选择设备采集的连续原始图像，帧数由实际扫描数据决定。'
+          )
+          Set-Content -Path "$dst/data/数据说明.txt" -Value $lines -Encoding UTF8
 
           New-Item -ItemType Directory -Force -Path "$dst/outputs" | Out-Null
           New-Item -ItemType Directory -Force -Path "$dst/logs" | Out-Null
