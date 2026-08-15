@@ -21,11 +21,22 @@ from PySide6.QtWidgets import (
 )
 
 from demo_data import ensure_demo_frames
-from gui import MainWindow, OUTPUT_ROOT, DEMO_DIR, ROOT
+import gui as base_gui
 
-LOG_DIR = ROOT / "logs"
+# In a PyInstaller onedir build, always keep user-visible data beside the exe.
+APP_ROOT = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent
+OUTPUT_ROOT = APP_ROOT / "outputs"
+DEMO_DIR = APP_ROOT / "samples" / "raw_laser_demo"
+LOG_DIR = APP_ROOT / "logs"
 LOG_FILE = LOG_DIR / "finals_app.log"
-BACKUP_DIR = ROOT / "finals_assets" / "demo_backup"
+BACKUP_DIR = APP_ROOT / "finals_assets" / "demo_backup"
+
+# Patch the original GUI module globals so its existing methods also use APP_ROOT.
+base_gui.ROOT = APP_ROOT
+base_gui.OUTPUT_ROOT = OUTPUT_ROOT
+base_gui.DEMO_DIR = DEMO_DIR
+base_gui.HISTORY_PATH = OUTPUT_ROOT / "history" / "measurement_history.csv"
+MainWindow = base_gui.MainWindow
 
 
 def configure_logging() -> None:
@@ -64,6 +75,11 @@ def check_system() -> list[tuple[str, bool, str]]:
         checks.append(("输出目录可写", False, str(exc)))
 
     try:
+        # Prefer the shipped backup, but regenerate deterministically if it is absent.
+        if len(list(DEMO_DIR.glob("frame_*.*"))) != 31 and BACKUP_DIR.exists():
+            DEMO_DIR.mkdir(parents=True, exist_ok=True)
+            for file in BACKUP_DIR.glob("frame_*.*"):
+                shutil.copy2(file, DEMO_DIR / file.name)
         demo_dir = ensure_demo_frames(DEMO_DIR, frame_count=31)
         frame_count = len(list(demo_dir.glob("frame_*.*")))
         checks.append(("标准演示数据", frame_count == 31, f"{frame_count}/31 帧"))
@@ -100,7 +116,13 @@ def restore_demo_data() -> tuple[bool, str]:
         if DEMO_DIR.exists():
             shutil.rmtree(DEMO_DIR)
         DEMO_DIR.mkdir(parents=True, exist_ok=True)
-        ensure_demo_frames(DEMO_DIR, frame_count=31)
+        copied = 0
+        if BACKUP_DIR.exists():
+            for file in BACKUP_DIR.glob("frame_*.*"):
+                shutil.copy2(file, DEMO_DIR / file.name)
+                copied += 1
+        if copied != 31:
+            ensure_demo_frames(DEMO_DIR, frame_count=31)
         return True, "标准演示数据已恢复。"
     except Exception as exc:
         logging.exception("Restore demo data failed")
@@ -113,7 +135,6 @@ class FinalsLauncher(QDialog):
         self.setWindowTitle("槽型深度宽度测量软件 · 决赛现场版")
         self.setMinimumSize(760, 560)
         self.main_window: MainWindow | None = None
-        self.status_labels: list[QLabel] = []
         self._build_ui()
         self.refresh_checks()
 
@@ -141,7 +162,6 @@ class FinalsLauncher(QDialog):
 
         self.overall = QLabel("正在检查系统……")
         self.overall.setAlignment(Qt.AlignCenter)
-        self.overall.setObjectName("overall")
         layout.addWidget(self.overall)
 
         self.start_button = QPushButton("开始现场演示")
@@ -171,7 +191,6 @@ class FinalsLauncher(QDialog):
         QDialog, QWidget { background:#182028; color:#eaf1f6; font-family:'Microsoft YaHei UI'; font-size:10.5pt; }
         QLabel#title { font-size:24pt; font-weight:700; color:white; }
         QLabel#subtitle { color:#8fa8ba; font-size:11pt; }
-        QLabel#overall { font-size:13pt; font-weight:700; padding:10px; border-radius:6px; background:#11181e; }
         QLabel#hint { color:#9eb0bd; padding-top:6px; }
         QPushButton { background:#2a3640; border:1px solid #4a5a66; border-radius:6px; padding:10px; }
         QPushButton:hover { background:#34434e; }
@@ -202,11 +221,11 @@ class FinalsLauncher(QDialog):
 
         if all_ok:
             self.overall.setText("系统状态：就绪")
-            self.overall.setStyleSheet("color:#70e895;background:#102019;padding:10px;border-radius:6px;")
+            self.overall.setStyleSheet("color:#70e895;background:#102019;padding:10px;border-radius:6px;font-size:13pt;font-weight:700;")
             self.start_button.setEnabled(True)
         else:
             self.overall.setText("系统状态：需要处理")
-            self.overall.setStyleSheet("color:#ff8383;background:#261616;padding:10px;border-radius:6px;")
+            self.overall.setStyleSheet("color:#ff8383;background:#261616;padding:10px;border-radius:6px;font-size:13pt;font-weight:700;")
             self.start_button.setEnabled(False)
 
     def restore_data(self) -> None:
@@ -231,14 +250,14 @@ class FinalsLauncher(QDialog):
             QMessageBox.critical(
                 self.main_window,
                 "现场演示未完成",
-                "标准演示未能完成。请返回启动页，点击“恢复演示数据”后重试。",
+                "标准演示未能完成。请重新启动软件，点击“恢复演示数据”后重试。",
             )
 
 
 def main() -> int:
     configure_logging()
     sys.excepthook = exception_hook
-    logging.info("Application start")
+    logging.info("Application start | root=%s", APP_ROOT)
     app = QApplication(sys.argv)
     app.setApplicationName("槽型深度宽度测量软件")
     launcher = FinalsLauncher()
