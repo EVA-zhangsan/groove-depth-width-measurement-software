@@ -3,10 +3,7 @@ from PyInstaller.utils.hooks import collect_all
 
 block_cipher = None
 
-datas = [
-    ('docs', 'docs'),
-    ('samples', 'samples'),
-]
+datas = []
 binaries = []
 hiddenimports = []
 
