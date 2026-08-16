@@ -1,5 +1,6 @@
 """Desktop GUI for groove depth and width measurement."""
 from __future__ import annotations
+import os
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -102,7 +103,13 @@ class MainWindow(QMainWindow):
         except Exception as exc: QMessageBox.critical(self,"报告生成失败",str(exc))
     def show_history(self):
         rows=read_recent_history(HISTORY_PATH,20); dialog=QDialog(self); dialog.setWindowTitle("最近测量历史"); dialog.resize(1000,520); layout=QVBoxLayout(dialog); text=QTextEdit(); text.setReadOnly(True); text.setPlainText("\n".join(f"{r.get('timestamp')} | {r.get('sample_id')} | 槽深均值 {r.get('measured_depth_mm')} ({r.get('depth_status')}) | 槽宽均值 {r.get('measured_width_mm')} ({r.get('width_status')})" for r in reversed(rows)) if rows else "暂无历史记录。"); layout.addWidget(text); dialog.exec()
-    def show_output_path(self): OUTPUT_ROOT.mkdir(parents=True,exist_ok=True); QMessageBox.information(self,"输出目录",str(OUTPUT_ROOT))
+    def show_output_path(self):
+        OUTPUT_ROOT.mkdir(parents=True,exist_ok=True)
+        try:
+            os.startfile(str(OUTPUT_ROOT))
+            self.log(f"已打开输出目录：{OUTPUT_ROOT}")
+        except Exception as exc:
+            QMessageBox.critical(self,"打开输出目录失败",f"无法打开输出目录：\n{OUTPUT_ROOT}\n\n{exc}")
 
 def main():
     app=QApplication(sys.argv); app.setApplicationName("槽型深度宽度测量软件"); window=MainWindow(); window.show(); return app.exec()
