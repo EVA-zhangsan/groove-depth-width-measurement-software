@@ -1,0 +1,88 @@
+name: Windows portable build
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Generate dense curved demo dataset
+        shell: pwsh
+        run: |
+          python -c "from demo_data import ensure_demo_frames; p=ensure_demo_frames('samples/raw_laser_demo', frame_count=181); print('demo:', p)"
+          $count = (Get-ChildItem samples/raw_laser_demo/frame_*.png).Count
+          if ($count -ne 181) { throw "Expected 181 demo frames, got $count" }
+
+      - name: Run hardware-free validation
+        shell: pwsh
+        run: python validate_stage5.py
+
+      - name: Build portable GUI
+        shell: pwsh
+        run: |
+          pyinstaller --noconfirm --clean --windowed --onedir `
+            --name "槽型深度宽度测量软件" `
+            --collect-all pyvista `
+            --collect-all pyvistaqt `
+            --hidden-import vtkmodules.qt.QVTKRenderWindowInteractor `
+            windows_entry.py
+
+      - name: Assemble competition package
+        shell: pwsh
+        run: |
+          $app = "dist/槽型深度宽度测量软件"
+          New-Item -ItemType Directory -Force -Path "$app/samples/raw_laser_demo" | Out-Null
+          New-Item -ItemType Directory -Force -Path "$app/outputs" | Out-Null
+          Copy-Item samples/raw_laser_demo/frame_*.png "$app/samples/raw_laser_demo/"
+          Copy-Item README.md "$app/README_GitHub.md"
+          @"
+          灵寻巧度 · 槽型深度宽度测量软件
+          Windows 便携演示版 v1.0.4
+
+          使用方法：
+          1. 请先完整解压整个 ZIP，不要在压缩包内直接运行。
+          2. 双击“槽型深度宽度测量软件.exe”。
+          3. 软件打开后可直接点击“运行内置演示”。
+          4. 内置演示包含 181 帧圆弧曲面 V 型槽图像数据。
+          5. 输出 PDF、历史记录和重建结果将保存到本目录 outputs 文件夹。
+
+          当前数据用于软件功能与算法链路演示；实际计量精度仍需正式标定和真实样本重复实验验证。
+          "@ | Set-Content -Encoding UTF8 "$app/比赛电脑_先看我.txt"
+
+      - name: Verify assembled files
+        shell: pwsh
+        run: |
+          $app = "dist/槽型深度宽度测量软件"
+          if (-not (Test-Path "$app/槽型深度宽度测量软件.exe")) { throw "EXE missing" }
+          $count = (Get-ChildItem "$app/samples/raw_laser_demo/frame_*.png").Count
+          if ($count -ne 181) { throw "Packaged demo frame count is $count, expected 181" }
+          Write-Host "Windows package ready; demo frames: $count"
+
+      - name: Upload Windows portable package
+        uses: actions/upload-artifact@v4
+        with:
+          name: groove-depth-width-v1.0.4-Windows-181frames
+          path: dist/槽型深度宽度测量软件/
+          if-no-files-found: error
+          compression-level: 6
+          retention-days: 30
