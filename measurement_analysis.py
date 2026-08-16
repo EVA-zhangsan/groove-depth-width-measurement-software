@@ -37,42 +37,56 @@ class MeasurementResult:
         return data
 
 
+def _fit_carrier_surface(x: np.ndarray, z: np.ndarray) -> np.ndarray:
+    """Estimate the local curved carrier from outer points, excluding the central groove."""
+    span = float(x.max() - x.min())
+    center = 0.5 * float(x.max() + x.min())
+    # The groove occupies only a small central portion; use the outer ~70% to fit curvature.
+    outer = np.abs(x - center) >= span * 0.15
+    if outer.sum() < 12:
+        outer = np.ones_like(x, dtype=bool)
+    degree = 2 if outer.sum() >= 20 else 1
+    coeff = np.polyfit(x[outer], z[outer], degree)
+    return np.polyval(coeff, x)
+
+
 def _fit_section(x: np.ndarray, z: np.ndarray) -> tuple[float, float] | None:
     order = np.argsort(x)
     x, z = x[order], z[order]
     if x.size < 20:
         return None
 
-    edge_count = max(5, int(x.size * 0.18))
-    baseline = float(np.median(np.concatenate([z[:edge_count], z[-edge_count:]])))
-    minimum_index = int(np.argmin(z))
+    # Remove the cylindrical/arc-like carrier before measuring the groove itself.
+    carrier = _fit_carrier_surface(x, z)
+    residual = z - carrier
+    minimum_index = int(np.argmin(residual))
     center_x = float(x[minimum_index])
-    raw_depth = baseline - float(z[minimum_index])
+    raw_depth = -float(residual[minimum_index])
     if raw_depth <= 1e-6:
         return None
 
-    lower = baseline - raw_depth * 0.95
-    upper = baseline - raw_depth * 0.05
-    left_mask = (x < center_x) & (z > lower) & (z < upper)
-    right_mask = (x > center_x) & (z > lower) & (z < upper)
+    lower = -raw_depth * 0.95
+    upper = -raw_depth * 0.05
+    left_mask = (x < center_x) & (residual > lower) & (residual < upper)
+    right_mask = (x > center_x) & (residual > lower) & (residual < upper)
 
     depth = raw_depth
     width = 0.0
     if left_mask.sum() >= 4 and right_mask.sum() >= 4:
-        left_m, left_b = np.polyfit(x[left_mask], z[left_mask], 1)
-        right_m, right_b = np.polyfit(x[right_mask], z[right_mask], 1)
+        left_m, left_b = np.polyfit(x[left_mask], residual[left_mask], 1)
+        right_m, right_b = np.polyfit(x[right_mask], residual[right_mask], 1)
         if abs(left_m) > 1e-9 and abs(right_m) > 1e-9 and abs(left_m - right_m) > 1e-9:
-            left_top = (baseline - left_b) / left_m
-            right_top = (baseline - right_b) / right_m
+            left_top = -left_b / left_m
+            right_top = -right_b / right_m
             intersection_x = (right_b - left_b) / (left_m - right_m)
             intersection_z = left_m * intersection_x + left_b
-            candidate_depth = baseline - intersection_z
+            candidate_depth = -intersection_z
             candidate_width = right_top - left_top
             if 0 < candidate_depth < raw_depth * 1.4 and candidate_width > 0:
                 depth, width = float(candidate_depth), float(candidate_width)
 
     if width <= 0:
-        groove_mask = z < baseline - raw_depth * 0.03
+        groove_mask = residual < -raw_depth * 0.03
         if groove_mask.sum() >= 2:
             width = float(x[groove_mask].max() - x[groove_mask].min())
 
