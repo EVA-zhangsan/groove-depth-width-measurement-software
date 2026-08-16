@@ -26,16 +26,27 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller
 
-      - name: Generate dense curved demo dataset
+      - name: Generate external curved image datasets
         shell: pwsh
         run: |
-          python -c "from demo_data import ensure_demo_frames; p=ensure_demo_frames('samples/raw_laser_demo', frame_count=181); print('demo:', p)"
-          $count = (Get-ChildItem samples/raw_laser_demo/frame_*.png).Count
-          if ($count -ne 181) { throw "Expected 181 demo frames, got $count" }
+          python -c "from demo_data import generate_demo_frames; generate_demo_frames('package_data/images_181_curved', frame_count=181, seed=20260816); generate_demo_frames('package_data/images_301_high_density_curved', frame_count=301, seed=20260817)"
+          $count181 = (Get-ChildItem package_data/images_181_curved/frame_*.png).Count
+          $count301 = (Get-ChildItem package_data/images_301_high_density_curved/frame_*.png).Count
+          if ($count181 -ne 181) { throw "Expected 181 frames, got $count181" }
+          if ($count301 -ne 301) { throw "Expected 301 frames, got $count301" }
+          Write-Host "External image datasets ready: $count181 and $count301 frames"
 
-      - name: Run hardware-free validation
+      - name: Generate matching external point clouds
         shell: pwsh
-        run: python validate_stage5.py
+        run: |
+          python -c "from offline_reconstruction import reconstruct_directory; r1=reconstruct_directory('package_data/images_181_curved','package_data/recon181'); r2=reconstruct_directory('package_data/images_301_high_density_curved','package_data/recon301'); print('181 points',r1['point_count']); print('301 points',r2['point_count'])"
+          if (-not (Test-Path "package_data/recon181/reconstructed_point_cloud.csv")) { throw "181 point cloud missing" }
+          if (-not (Test-Path "package_data/recon301/reconstructed_point_cloud.csv")) { throw "301 point cloud missing" }
+
+      - name: Validate both external datasets
+        shell: pwsh
+        run: |
+          python -c "from offline_reconstruction import reconstruct_directory; from measurement_analysis import analyze_groove; r1=reconstruct_directory('package_data/images_181_curved','package_data/check181'); m1=analyze_groove(r1['points']); r2=reconstruct_directory('package_data/images_301_high_density_curved','package_data/check301'); m2=analyze_groove(r2['points']); print('181:',len(m1.sections),m1.depth_mean,m1.width_mean); print('301:',len(m2.sections),m2.depth_mean,m2.width_mean); assert r1['valid_frames']==181; assert r2['valid_frames']==301; assert abs(m1.depth_mean-0.6000)<=0.0200; assert abs(m1.width_mean-0.8500)<=0.0200; assert abs(m2.depth_mean-0.6000)<=0.0200; assert abs(m2.width_mean-0.8500)<=0.0200"
 
       - name: Build portable GUI
         shell: pwsh
@@ -51,22 +62,41 @@ jobs:
         shell: pwsh
         run: |
           $app = "dist/槽型深度宽度测量软件"
-          New-Item -ItemType Directory -Force -Path "$app/samples/raw_laser_demo" | Out-Null
+          New-Item -ItemType Directory -Force -Path "$app/示例数据/01_原始图像_181帧曲面V槽" | Out-Null
+          New-Item -ItemType Directory -Force -Path "$app/示例数据/02_原始图像_301帧高密度曲面V槽" | Out-Null
+          New-Item -ItemType Directory -Force -Path "$app/示例数据/03_外部点云" | Out-Null
           New-Item -ItemType Directory -Force -Path "$app/outputs" | Out-Null
-          Copy-Item samples/raw_laser_demo/frame_*.png "$app/samples/raw_laser_demo/"
+
+          Copy-Item package_data/images_181_curved/frame_*.png "$app/示例数据/01_原始图像_181帧曲面V槽/"
+          Copy-Item package_data/images_301_high_density_curved/frame_*.png "$app/示例数据/02_原始图像_301帧高密度曲面V槽/"
+          Copy-Item package_data/recon181/reconstructed_point_cloud.csv "$app/示例数据/03_外部点云/181帧曲面V槽点云.csv"
+          Copy-Item package_data/recon301/reconstructed_point_cloud.csv "$app/示例数据/03_外部点云/301帧高密度曲面V槽点云.csv"
           Copy-Item README.md "$app/README_GitHub.md"
+
           @"
           灵寻巧度 · 槽型深度宽度测量软件
-          Windows 便携演示版 v1.0.4
+          Windows 比赛便携版 v1.0.4-ext
 
-          使用方法：
-          1. 请先完整解压整个 ZIP，不要在压缩包内直接运行。
-          2. 双击“槽型深度宽度测量软件.exe”。
-          3. 软件打开后可直接点击“运行内置演示”。
-          4. 内置演示包含 181 帧圆弧曲面 V 型槽图像数据。
-          5. 输出 PDF、历史记录和重建结果将保存到本目录 outputs 文件夹。
+          推荐演示方式：外部导入，不使用内置演示。
 
-          当前数据用于软件功能与算法链路演示；实际计量精度仍需正式标定和真实样本重复实验验证。
+          A. 从原始图片目录导入（推荐，能完整展示图像处理链）：
+          1. 双击“槽型深度宽度测量软件.exe”。
+          2. 保持标准槽深 0.6000 mm、标准槽宽 0.8500 mm、允许误差 0.0200 mm。
+          3. 点击“应用任务参数”。
+          4. 点击“选择原始图片目录”。
+          5. 比赛主演示建议选择：示例数据\01_原始图像_181帧曲面V槽。
+          6. 若需要更高密度展示，选择：示例数据\02_原始图像_301帧高密度曲面V槽。
+
+          B. 从外部点云导入（速度更快）：
+          1. 点击“导入点云文件”。
+          2. 进入：示例数据\03_外部点云。
+          3. 可选择 181 帧或 301 帧对应点云 CSV。
+
+          说明：
+          - 181 帧版本适合比赛现场完整流程演示。
+          - 301 帧版本用于高密度点云展示和备用演示。
+          - 两套数据均为圆弧/曲面基体上的 V 型槽，并加入连续微小加工与成像扰动。
+          - 当前数据用于软件功能和算法链路演示，不等同于真实硬件计量精度认证。
           "@ | Set-Content -Encoding UTF8 "$app/比赛电脑_先看我.txt"
 
       - name: Verify assembled files
@@ -74,14 +104,18 @@ jobs:
         run: |
           $app = "dist/槽型深度宽度测量软件"
           if (-not (Test-Path "$app/槽型深度宽度测量软件.exe")) { throw "EXE missing" }
-          $count = (Get-ChildItem "$app/samples/raw_laser_demo/frame_*.png").Count
-          if ($count -ne 181) { throw "Packaged demo frame count is $count, expected 181" }
-          Write-Host "Windows package ready; demo frames: $count"
+          $count181 = (Get-ChildItem "$app/示例数据/01_原始图像_181帧曲面V槽/frame_*.png").Count
+          $count301 = (Get-ChildItem "$app/示例数据/02_原始图像_301帧高密度曲面V槽/frame_*.png").Count
+          if ($count181 -ne 181) { throw "Packaged 181 dataset count is $count181" }
+          if ($count301 -ne 301) { throw "Packaged 301 dataset count is $count301" }
+          if (-not (Test-Path "$app/示例数据/03_外部点云/181帧曲面V槽点云.csv")) { throw "181 CSV missing" }
+          if (-not (Test-Path "$app/示例数据/03_外部点云/301帧高密度曲面V槽点云.csv")) { throw "301 CSV missing" }
+          Write-Host "Competition package ready: external 181 + 301 image datasets and both point clouds"
 
       - name: Upload Windows portable package
         uses: actions/upload-artifact@v4
         with:
-          name: groove-depth-width-v1.0.4-Windows-181frames
+          name: groove-depth-width-v1.0.4-ext-Windows-181-and-301
           path: dist/槽型深度宽度测量软件/
           if-no-files-found: error
           compression-level: 6
