@@ -23,9 +23,9 @@ def main() -> int:
         target_width_mm=0.8500,
         tolerance_mm=0.0200,
         operator="Stage5 Validator",
-        notes="自动闭环验证",
+        notes="181帧曲面工件自动闭环验证",
     )
-    demo_dir = ensure_demo_frames(ROOT / "samples" / "raw_laser_demo")
+    demo_dir = ensure_demo_frames(ROOT / "samples" / "raw_laser_demo", frame_count=181)
     session = ROOT / "outputs" / "validation" / datetime.now().strftime("%Y%m%d_%H%M%S")
     reconstruction = reconstruct_directory(demo_dir, session)
     result = analyze_groove(reconstruction["points"])
@@ -33,10 +33,10 @@ def main() -> int:
 
     depth_error = abs(result.depth_mean - task.target_depth_mm)
     width_error = abs(result.width_mean - task.target_width_mm)
-    assert reconstruction["original_frames"] == 31
-    assert reconstruction["valid_frames"] == 31
-    assert reconstruction["point_count"] > 10000
-    assert len(result.sections) >= 20
+    assert reconstruction["original_frames"] == 181
+    assert reconstruction["valid_frames"] == 181
+    assert reconstruction["point_count"] > 100000
+    assert len(result.sections) >= 170
     assert depth_error <= task.tolerance_mm
     assert width_error <= task.tolerance_mm
     assert report_path.exists()
