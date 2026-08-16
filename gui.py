@@ -13,12 +13,11 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import (
     QApplication, QComboBox, QDialog, QDoubleSpinBox, QFileDialog, QFormLayout,
-    QGridLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QMainWindow,
+    QGridLayout, QGroupBox, QLabel, QLineEdit, QMainWindow,
     QMessageBox, QPushButton, QSplitter, QTabWidget, QTextEdit, QVBoxLayout, QWidget,
 )
 from pyvistaqt import QtInteractor
 
-from demo_data import ensure_demo_frames
 from history_manager import append_history, read_recent_history
 from measurement_analysis import analyze_groove
 from measurement_task import MeasurementTask
@@ -27,7 +26,6 @@ from report_generator import generate_measurement_report
 
 ROOT = Path(__file__).resolve().parent
 OUTPUT_ROOT = ROOT / "outputs"
-DEMO_DIR = ROOT / "samples" / "raw_laser_demo"
 HISTORY_PATH = OUTPUT_ROOT / "history" / "measurement_history.csv"
 
 
@@ -58,7 +56,7 @@ def array_to_pixmap(image: np.ndarray, target: QLabel) -> QPixmap:
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("槽型深度宽度测量软件 | Stage 5")
+        self.setWindowTitle("槽型深度宽度测量软件")
         self.resize(1680, 980)
         self.task: MeasurementTask | None = None
         self.reconstruction: dict | None = None
@@ -68,7 +66,7 @@ class MainWindow(QMainWindow):
         self._build_ui()
         self._apply_style()
         self.apply_task()
-        self.log("软件已启动。建议先点击“运行内置演示”。")
+        self.log("软件已启动。请从外部选择原始图片目录，或导入点云文件。")
 
     def _build_ui(self) -> None:
         root = QWidget(self)
@@ -102,16 +100,16 @@ class MainWindow(QMainWindow):
 
         group = QGroupBox("测量任务设置")
         form = QFormLayout(group)
-        self.sample_id = QLineEdit("DEMO-V-001")
+        self.sample_id = QLineEdit("SAMPLE-001")
         self.groove_type = QComboBox()
         self.groove_type.addItems(["直线 V 型槽", "环形槽", "十字槽", "球弧面槽"])
         self.data_nature = QComboBox()
-        self.data_nature.addItems(["离线演示数据", "原始激光图像", "外部点云"])
+        self.data_nature.addItems(["原始激光图像", "外部点云"])
         self.target_depth = QDoubleSpinBox(); self.target_depth.setRange(0.0001, 1000); self.target_depth.setDecimals(4); self.target_depth.setValue(0.6000)
         self.target_width = QDoubleSpinBox(); self.target_width.setRange(0.0001, 1000); self.target_width.setDecimals(4); self.target_width.setValue(0.8500)
         self.tolerance = QDoubleSpinBox(); self.tolerance.setRange(0.0001, 100); self.tolerance.setDecimals(4); self.tolerance.setValue(0.0200)
         self.operator = QLineEdit("")
-        self.notes = QLineEdit("Stage 5 动态演示")
+        self.notes = QLineEdit("")
         form.addRow("样本编号", self.sample_id)
         form.addRow("槽型", self.groove_type)
         form.addRow("数据性质", self.data_nature)
@@ -124,10 +122,8 @@ class MainWindow(QMainWindow):
 
         apply_button = QPushButton("应用任务参数")
         apply_button.clicked.connect(self.apply_task)
-        demo_button = QPushButton("运行内置演示")
-        demo_button.setObjectName("primary")
-        demo_button.clicked.connect(self.run_demo)
         image_button = QPushButton("选择原始图片目录")
+        image_button.setObjectName("primary")
         image_button.clicked.connect(self.select_image_directory)
         cloud_button = QPushButton("导入点云文件")
         cloud_button.clicked.connect(self.import_point_cloud)
@@ -135,7 +131,7 @@ class MainWindow(QMainWindow):
         analyze_button.clicked.connect(self.analyze_current)
         reset_button = QPushButton("回到推荐视角")
         reset_button.clicked.connect(self.reset_camera)
-        for button in [apply_button, demo_button, image_button, cloud_button, analyze_button, reset_button]:
+        for button in [apply_button, image_button, cloud_button, analyze_button, reset_button]:
             outer.addWidget(button)
         outer.addStretch(1)
         return panel
@@ -176,7 +172,7 @@ class MainWindow(QMainWindow):
         self.tabs = QTabWidget()
         self.image_labels: dict[str, QLabel] = {}
         for name in ["原始图像", "中心提取", "二值掩膜"]:
-            label = QLabel("运行演示或导入图片后显示")
+            label = QLabel("导入原始图片目录后显示")
             label.setAlignment(Qt.AlignCenter)
             label.setMinimumHeight(190)
             label.setStyleSheet("background:#10151a;border:1px solid #3a4650;")
@@ -190,7 +186,7 @@ class MainWindow(QMainWindow):
         report_button.clicked.connect(self.generate_report)
         history_button = QPushButton("查看历史记录")
         history_button.clicked.connect(self.show_history)
-        open_output_button = QPushButton("显示输出目录")
+        open_output_button = QPushButton("打开输出结果")
         open_output_button.clicked.connect(self.show_output_path)
         button_row.addWidget(report_button, 0, 0, 1, 2)
         button_row.addWidget(history_button, 1, 0)
@@ -233,22 +229,13 @@ class MainWindow(QMainWindow):
         except Exception as exc:
             QMessageBox.critical(self, "任务参数错误", str(exc))
 
-    def run_demo(self) -> None:
-        self.apply_task()
-        try:
-            self.data_nature.setCurrentText("离线演示数据")
-            demo_dir = ensure_demo_frames(DEMO_DIR)
-            self._run_image_directory(demo_dir)
-        except Exception as exc:
-            QMessageBox.critical(self, "演示失败", str(exc))
-            self.log(f"演示失败：{exc}")
-
     def select_image_directory(self) -> None:
-        directory = QFileDialog.getExistingDirectory(self, "选择原始激光图片目录", str(ROOT))
+        default_dir = ROOT / "示例数据"
+        directory = QFileDialog.getExistingDirectory(self, "选择原始激光图片目录", str(default_dir if default_dir.exists() else ROOT))
         if not directory:
             return
-        self.apply_task()
         self.data_nature.setCurrentText("原始激光图像")
+        self.apply_task()
         try:
             self._run_image_directory(Path(directory))
         except Exception as exc:
@@ -267,12 +254,13 @@ class MainWindow(QMainWindow):
         self.log(f"完成：{self.reconstruction['valid_frames']}/{self.reconstruction['original_frames']} 帧有效，点云 {self.reconstruction['point_count']} 点。")
 
     def import_point_cloud(self) -> None:
-        filename, _ = QFileDialog.getOpenFileName(self, "导入点云文件", str(ROOT), "Point Cloud (*.csv *.ply *.pcd *.xyz)")
+        default_dir = ROOT / "示例数据"
+        filename, _ = QFileDialog.getOpenFileName(self, "导入点云文件", str(default_dir if default_dir.exists() else ROOT), "Point Cloud (*.csv *.ply *.pcd *.xyz)")
         if not filename:
             return
         try:
-            self.apply_task()
             self.data_nature.setCurrentText("外部点云")
+            self.apply_task()
             self.points = load_point_cloud(Path(filename))
             self.reconstruction = {
                 "points": self.points, "source_dir": str(Path(filename).parent), "point_cloud_csv": filename,
@@ -288,7 +276,7 @@ class MainWindow(QMainWindow):
 
     def analyze_current(self) -> None:
         if self.points is None:
-            QMessageBox.information(self, "提示", "请先运行演示或导入数据。")
+            QMessageBox.information(self, "提示", "请先导入原始图片目录或点云文件。")
             return
         try:
             self.result = analyze_groove(self.points)
@@ -303,7 +291,7 @@ class MainWindow(QMainWindow):
         self.viewer.clear()
         cloud = pv.PolyData(self.points)
         cloud["height"] = self.points[:, 2]
-        self.viewer.add_mesh(cloud, scalars="height", point_size=3.5, render_points_as_spheres=True, cmap="turbo", scalar_bar_args={"title": "Z / mm"})
+        self.viewer.add_mesh(cloud, scalars="height", point_size=3.0, render_points_as_spheres=True, cmap="turbo", scalar_bar_args={"title": "Z / mm"})
         self.viewer.add_axes()
         self.viewer.show_grid(color="#82909b")
         self.viewer.view_isometric()
@@ -370,7 +358,7 @@ class MainWindow(QMainWindow):
                 "report_seconds": report_seconds, "report_path": str(self.last_report),
             })
             self.log(f"PDF报告已生成：{self.last_report}")
-            QMessageBox.information(self, "报告生成成功", str(self.last_report))
+            QMessageBox.information(self, "报告生成成功", "测量报告已保存至输出结果目录。")
         except Exception as exc:
             QMessageBox.critical(self, "报告生成失败", str(exc))
 
@@ -381,7 +369,7 @@ class MainWindow(QMainWindow):
         if rows:
             lines = []
             for row in reversed(rows):
-                lines.append(f"{row.get('timestamp')} | {row.get('sample_id')} | 深度 {row.get('measured_depth_mm')} ({row.get('depth_status')}) | 宽度 {row.get('measured_width_mm')} ({row.get('width_status')}) | {row.get('report_path')}")
+                lines.append(f"{row.get('timestamp')} | {row.get('sample_id')} | 槽深均值 {row.get('measured_depth_mm')} mm ({row.get('depth_status')}) | 槽宽均值 {row.get('measured_width_mm')} mm ({row.get('width_status')})")
             text.setPlainText("\n".join(lines))
         else:
             text.setPlainText("暂无历史记录。完成测量并生成报告后自动写入。")
@@ -389,8 +377,12 @@ class MainWindow(QMainWindow):
 
     def show_output_path(self) -> None:
         OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
-        self.log(f"输出目录：{OUTPUT_ROOT}")
-        QMessageBox.information(self, "输出目录", str(OUTPUT_ROOT))
+        try:
+            import os
+            os.startfile(str(OUTPUT_ROOT))
+        except Exception:
+            self.log(f"输出目录：{OUTPUT_ROOT}")
+            QMessageBox.information(self, "输出目录", str(OUTPUT_ROOT))
 
 
 def main() -> int:
