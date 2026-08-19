@@ -5,6 +5,9 @@ on:
     branches: [main]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build-windows:
     runs-on: windows-latest
@@ -95,6 +98,13 @@ jobs:
           if (-not (Test-Path "$app/示例数据/03_外部点云/181帧_紧凑曲面V槽点云.csv")) { throw "181 CSV missing" }
           if (-not (Test-Path "$app/示例数据/03_外部点云/301帧_高密度紧凑曲面V槽点云.csv")) { throw "301 CSV missing" }
 
+      - name: Create downloadable ZIP
+        shell: pwsh
+        run: |
+          $zip = "灵寻巧度_v1.0.5_兼容版_Windows_一键内置案例.zip"
+          Compress-Archive -Path "dist/槽型深度宽度测量软件/*" -DestinationPath $zip -CompressionLevel Optimal -Force
+          if (-not (Test-Path $zip)) { throw "ZIP missing" }
+
       - name: Upload Windows portable package
         uses: actions/upload-artifact@v4
         with:
@@ -103,3 +113,13 @@ jobs:
           if-no-files-found: error
           compression-level: 6
           retention-days: 30
+
+      - name: Publish compatibility ZIP release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "v1.0.5-compat-20260819"
+          $zip = "灵寻巧度_v1.0.5_兼容版_Windows_一键内置案例.zip"
+          gh release delete $tag --cleanup-tag --yes 2>$null
+          gh release create $tag $zip --title "v1.0.5 Windows 比赛兼容演示版" --notes "一键内置案例；181 帧紧凑曲面 V 槽；保留 301 帧高密度外部数据；三维视图采用普通点与截面线双重显示，用于提高不同 Windows/显卡环境下的演示兼容性。"
