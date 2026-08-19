@@ -1,0 +1,1 @@
+Trigger neutral Windows portable build after neutralized GUI text.
