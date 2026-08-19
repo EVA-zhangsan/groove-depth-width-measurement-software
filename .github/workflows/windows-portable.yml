@@ -45,7 +45,7 @@ jobs:
         run: |
           python -c "from offline_reconstruction import reconstruct_directory; from measurement_analysis import analyze_groove; r1=reconstruct_directory('package_data/images_181_tight_curved','package_data/check181'); m1=analyze_groove(r1['points']); r2=reconstruct_directory('package_data/images_301_tight_curved','package_data/check301'); m2=analyze_groove(r2['points']); print('181:',len(m1.sections),m1.depth_mean,m1.width_mean,m1.depth_min,m1.depth_max,m1.width_min,m1.width_max); print('301:',len(m2.sections),m2.depth_mean,m2.width_mean,m2.depth_min,m2.depth_max,m2.width_min,m2.width_max); assert r1['valid_frames']==181; assert r2['valid_frames']==301; assert abs(m1.depth_mean-0.6000)<=0.0200; assert abs(m1.width_mean-0.8500)<=0.0200; assert abs(m2.depth_mean-0.6000)<=0.0200; assert abs(m2.width_mean-0.8500)<=0.0200"
 
-      - name: Build portable GUI
+      - name: Build portable GUI compatibility edition
         shell: pwsh
         run: |
           pyinstaller --noconfirm --clean --windowed --onedir `
@@ -53,7 +53,7 @@ jobs:
             --collect-all pyvista `
             --collect-all pyvistaqt `
             --hidden-import vtkmodules.qt.QVTKRenderWindowInteractor `
-            windows_entry.py
+            compat_entry.py
 
       - name: Assemble competition package
         shell: pwsh
@@ -69,22 +69,18 @@ jobs:
           Copy-Item package_data/recon301/reconstructed_point_cloud.csv "$app/示例数据/03_外部点云/301帧_高密度紧凑曲面V槽点云.csv"
           @"
           灵寻巧度 · 槽型深度宽度测量软件
-          Windows 比赛便携版 v1.0.5
+          Windows 比赛兼容演示版 v1.0.5-compat
 
-          本版按实际展示要求重新调整横向视野：
-          - 标准槽宽仍为 0.8500 mm，标准槽深仍为 0.6000 mm；
-          - 横向总视野约 2.0 mm，槽体成为画面主体；
-          - 槽两侧只保留短圆弧基面，不再出现大面积近似平面；
-          - 181 帧用于现场完整流程，301 帧用于高密度展示。
+          本版专门用于避免部分电脑出现“分析结果正常，但三维点云区只剩坐标网格”的显示问题。
 
-          推荐演示：
+          推荐：
           1. 双击“槽型深度宽度测量软件.exe”。
-          2. 点击“应用任务参数”。
-          3. 点击“选择原始图片目录”。
-          4. 选择“示例数据\01_原始图像_181帧_紧凑曲面V槽”，或高密度的 301 帧目录。
-          5. 如需更快展示，可点击“导入点云文件”，选择“示例数据\03_外部点云”中的 CSV。
+          2. 直接点击左侧“一键运行内置案例”。
+          3. 软件自动载入 181 帧比赛案例，无需手动选择路径。
+          4. 三维视图采用普通点 + 截面线双重显示，兼容性更高。
+          5. 原来的“选择原始图片目录”和“导入点云文件”仍然保留。
 
-          当前数据用于软件流程和算法展示，实际计量精度仍需正式标定与真实样本验证。
+          如果兼容版仍只显示网格，请优先更新电脑显卡驱动后重试。
           "@ | Set-Content -Encoding UTF8 "$app/比赛电脑_先看我.txt"
 
       - name: Verify assembled files
@@ -102,7 +98,7 @@ jobs:
       - name: Upload Windows portable package
         uses: actions/upload-artifact@v4
         with:
-          name: groove-depth-width-v1.0.5-Windows-tight-curved-181-and-301
+          name: groove-depth-width-v1.0.5-compat-Windows-one-click
           path: dist/槽型深度宽度测量软件/
           if-no-files-found: error
           compression-level: 6
