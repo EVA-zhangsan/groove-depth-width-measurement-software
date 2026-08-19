@@ -1,0 +1,128 @@
+name: Windows no-OpenGL safe build
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-safe-windows:
+    runs-on: windows-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install safe-edition dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          pip install "numpy>=1.24" "pandas>=2.0" "opencv-python>=4.8" "PySide6>=6.5" "matplotlib>=3.7" "reportlab>=4.0" pyinstaller
+
+      - name: Generate 181 and 301 frame datasets
+        shell: pwsh
+        run: |
+          python -c "from demo_data import generate_demo_frames; generate_demo_frames('package_data/images_181_tight_curved', frame_count=181, seed=20260816); generate_demo_frames('package_data/images_301_tight_curved', frame_count=301, seed=20260817)"
+          if ((Get-ChildItem package_data/images_181_tight_curved/frame_*.png).Count -ne 181) { throw "181 frame generation failed" }
+          if ((Get-ChildItem package_data/images_301_tight_curved/frame_*.png).Count -ne 301) { throw "301 frame generation failed" }
+
+      - name: Generate point clouds and preview evidence
+        shell: pwsh
+        run: |
+          python -c "from offline_reconstruction import reconstruct_directory; r1=reconstruct_directory('package_data/images_181_tight_curved','package_data/recon181'); r2=reconstruct_directory('package_data/images_301_tight_curved','package_data/recon301'); print('181',r1['point_count']); print('301',r2['point_count'])"
+          if (-not (Test-Path "package_data/recon181/reconstructed_point_cloud.csv")) { throw "181 point cloud missing" }
+          if (-not (Test-Path "package_data/recon181/debug/original.png")) { throw "preview original missing" }
+          if (-not (Test-Path "package_data/recon181/debug/center_overlay.png")) { throw "preview overlay missing" }
+          if (-not (Test-Path "package_data/recon181/debug/binary_mask.png")) { throw "preview mask missing" }
+
+      - name: Validate numerical results
+        shell: pwsh
+        run: |
+          python -c "import pandas as pd; from measurement_analysis import analyze_groove; p1=pd.read_csv('package_data/recon181/reconstructed_point_cloud.csv')[['x','y','z']].to_numpy(float); p2=pd.read_csv('package_data/recon301/reconstructed_point_cloud.csv')[['x','y','z']].to_numpy(float); m1=analyze_groove(p1); m2=analyze_groove(p2); print('181:',len(m1.sections),m1.depth_mean,m1.width_mean); print('301:',len(m2.sections),m2.depth_mean,m2.width_mean); assert len(m1.sections)==181; assert len(m2.sections)==301; assert abs(m1.depth_mean-0.6000)<=0.0200; assert abs(m1.width_mean-0.8500)<=0.0200; assert abs(m2.depth_mean-0.6000)<=0.0200; assert abs(m2.width_mean-0.8500)<=0.0200"
+
+      - name: Build Windows safe GUI without VTK/OpenGL
+        shell: pwsh
+        run: |
+          pyinstaller --noconfirm --clean --windowed --onedir `
+            --name "槽型深度宽度测量软件_比赛安全版" `
+            --hidden-import matplotlib.backends.backend_agg `
+            safe_entry.py
+
+      - name: Assemble safe competition package
+        shell: pwsh
+        run: |
+          $app = "dist/槽型深度宽度测量软件_比赛安全版"
+          New-Item -ItemType Directory -Force -Path "$app/示例数据/01_原始图像_181帧_紧凑曲面V槽" | Out-Null
+          New-Item -ItemType Directory -Force -Path "$app/示例数据/02_原始图像_301帧_高密度紧凑曲面V槽" | Out-Null
+          New-Item -ItemType Directory -Force -Path "$app/示例数据/03_外部点云" | Out-Null
+          New-Item -ItemType Directory -Force -Path "$app/示例数据/04_安全演示预览" | Out-Null
+          New-Item -ItemType Directory -Force -Path "$app/outputs" | Out-Null
+          Copy-Item package_data/images_181_tight_curved/frame_*.png "$app/示例数据/01_原始图像_181帧_紧凑曲面V槽/"
+          Copy-Item package_data/images_301_tight_curved/frame_*.png "$app/示例数据/02_原始图像_301帧_高密度紧凑曲面V槽/"
+          Copy-Item package_data/recon181/reconstructed_point_cloud.csv "$app/示例数据/03_外部点云/181帧_紧凑曲面V槽点云.csv"
+          Copy-Item package_data/recon301/reconstructed_point_cloud.csv "$app/示例数据/03_外部点云/301帧_高密度紧凑曲面V槽点云.csv"
+          Copy-Item package_data/recon181/debug/original.png "$app/示例数据/04_安全演示预览/original.png"
+          Copy-Item package_data/recon181/debug/center_overlay.png "$app/示例数据/04_安全演示预览/center_overlay.png"
+          Copy-Item package_data/recon181/debug/binary_mask.png "$app/示例数据/04_安全演示预览/binary_mask.png"
+          @"
+          灵寻巧度 · Windows 比赛安全版（无 OpenGL）
+
+          这是比赛现场优先推荐版本。
+
+          最稳演示：
+          1. 完整解压整个 ZIP。
+          2. 双击“槽型深度宽度测量软件_比赛安全版.exe”。
+          3. 点击左侧绿色“一键安全演示（推荐）”。
+          4. 软件直接载入预生成 181 帧点云和三张图像处理预览，完成分析并用 CPU 绘制三维兼容投影。
+          5. 此模式不使用 VTK / OpenGL，不需要更新显卡驱动。
+
+          如果希望现场展示完整图像重建过程，可点击“一键完整重建（181帧）”。
+          也可继续使用“选择原始图片目录”或“导入点云文件（CSV/XYZ）”。
+
+          注意：CPU兼容投影用于稳定展示三维形貌；槽深槽宽数值分析仍然基于完整三维点云。
+          "@ | Set-Content -Encoding UTF8 "$app/比赛电脑_先看我.txt"
+
+      - name: Verify safe package
+        shell: pwsh
+        run: |
+          $app = "dist/槽型深度宽度测量软件_比赛安全版"
+          if (-not (Test-Path "$app/槽型深度宽度测量软件_比赛安全版.exe")) { throw "safe EXE missing" }
+          if ((Get-ChildItem "$app/示例数据/01_原始图像_181帧_紧凑曲面V槽/frame_*.png").Count -ne 181) { throw "181 data missing" }
+          if ((Get-ChildItem "$app/示例数据/02_原始图像_301帧_高密度紧凑曲面V槽/frame_*.png").Count -ne 301) { throw "301 data missing" }
+          if (-not (Test-Path "$app/示例数据/03_外部点云/181帧_紧凑曲面V槽点云.csv")) { throw "181 CSV missing" }
+          if (-not (Test-Path "$app/示例数据/04_安全演示预览/center_overlay.png")) { throw "preview missing" }
+
+      - name: Create ZIP
+        shell: pwsh
+        run: |
+          $zip = "灵寻巧度_v1.0.5_Windows_比赛安全版_无OpenGL.zip"
+          Compress-Archive -Path "dist/槽型深度宽度测量软件_比赛安全版/*" -DestinationPath $zip -CompressionLevel Optimal -Force
+          if (-not (Test-Path $zip)) { throw "ZIP missing" }
+
+      - name: Upload safe artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: groove-depth-width-v1.0.5-safe-Windows-no-OpenGL
+          path: dist/槽型深度宽度测量软件_比赛安全版/
+          if-no-files-found: error
+          compression-level: 6
+          retention-days: 30
+
+      - name: Publish fixed safe release ZIP
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "v1.0.5-safe-20260819"
+          $zip = "灵寻巧度_v1.0.5_Windows_比赛安全版_无OpenGL.zip"
+          gh release delete $tag --cleanup-tag --yes 2>$null
+          gh release create $tag $zip --title "v1.0.5 Windows 比赛安全版（无 OpenGL）" --notes "比赛现场优先推荐：不使用 VTK/OpenGL，中央三维形貌改为 CPU 兼容投影；一键安全演示直接载入预生成 181 帧点云与图像处理预览；仍保留完整 181/301 帧外部数据。"
