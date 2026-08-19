@@ -17,6 +17,17 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Record current compatibility run id
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $path = "LATEST_RUN_ID.txt"
+          $meta = gh api "repos/${{ github.repository }}/contents/$path?ref=compat-meta" | ConvertFrom-Json
+          $payload = "${{ github.run_id }}`n"
+          $content = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($payload))
+          gh api --method PUT "repos/${{ github.repository }}/contents/$path" -f message="update compatibility run id [skip ci]" -f content="$content" -f sha="$($meta.sha)" -f branch="compat-meta" | Out-Null
+
       - name: Set up Python 3.10
         uses: actions/setup-python@v5
         with:
