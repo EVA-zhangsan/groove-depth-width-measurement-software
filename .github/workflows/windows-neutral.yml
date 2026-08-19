@@ -1,0 +1,114 @@
+name: Windows neutral portable build
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows-neutral:
+    runs-on: windows-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Generate image datasets
+        shell: pwsh
+        run: |
+          python -c "from demo_data import generate_demo_frames; generate_demo_frames('package_data/images_181', frame_count=181, seed=20260816); generate_demo_frames('package_data/images_301', frame_count=301, seed=20260817)"
+          if ((Get-ChildItem package_data/images_181/frame_*.png).Count -ne 181) { throw "181-frame dataset incomplete" }
+          if ((Get-ChildItem package_data/images_301/frame_*.png).Count -ne 301) { throw "301-frame dataset incomplete" }
+
+      - name: Generate matching point clouds
+        shell: pwsh
+        run: |
+          python -c "from offline_reconstruction import reconstruct_directory; reconstruct_directory('package_data/images_181','package_data/recon181'); reconstruct_directory('package_data/images_301','package_data/recon301')"
+
+      - name: Validate datasets
+        shell: pwsh
+        run: |
+          python -c "from offline_reconstruction import reconstruct_directory; from measurement_analysis import analyze_groove; r1=reconstruct_directory('package_data/images_181','package_data/check181'); m1=analyze_groove(r1['points']); r2=reconstruct_directory('package_data/images_301','package_data/check301'); m2=analyze_groove(r2['points']); print('181:',r1['valid_frames'],r1['point_count'],m1.depth_mean,m1.width_mean); print('301:',r2['valid_frames'],r2['point_count'],m2.depth_mean,m2.width_mean); assert r1['valid_frames']==181; assert r2['valid_frames']==301; assert abs(m1.depth_mean-0.6000)<=0.0200; assert abs(m1.width_mean-0.8500)<=0.0200; assert abs(m2.depth_mean-0.6000)<=0.0200; assert abs(m2.width_mean-0.8500)<=0.0200"
+
+      - name: Build portable GUI
+        shell: pwsh
+        run: |
+          pyinstaller --noconfirm --clean --windowed --onedir `
+            --name "槽型深度宽度测量软件" `
+            --collect-all pyvista `
+            --collect-all pyvistaqt `
+            --hidden-import vtkmodules.qt.QVTKRenderWindowInteractor `
+            neutral_entry.py
+
+      - name: Assemble portable package
+        shell: pwsh
+        run: |
+          $app = "dist/槽型深度宽度测量软件"
+          New-Item -ItemType Directory -Force -Path "$app/示例数据/01_原始图像_181帧_紧凑曲面V槽" | Out-Null
+          New-Item -ItemType Directory -Force -Path "$app/示例数据/02_原始图像_301帧_高密度紧凑曲面V槽" | Out-Null
+          New-Item -ItemType Directory -Force -Path "$app/示例数据/03_外部点云" | Out-Null
+          New-Item -ItemType Directory -Force -Path "$app/outputs" | Out-Null
+          Copy-Item package_data/images_181/frame_*.png "$app/示例数据/01_原始图像_181帧_紧凑曲面V槽/"
+          Copy-Item package_data/images_301/frame_*.png "$app/示例数据/02_原始图像_301帧_高密度紧凑曲面V槽/"
+          Copy-Item package_data/recon181/reconstructed_point_cloud.csv "$app/示例数据/03_外部点云/181帧_紧凑曲面V槽点云.csv"
+          Copy-Item package_data/recon301/reconstructed_point_cloud.csv "$app/示例数据/03_外部点云/301帧_高密度紧凑曲面V槽点云.csv"
+          @"
+          灵寻巧度 · 槽型深度宽度测量软件
+          Windows 便携版 v1.0.5
+
+          使用方法：
+          1. 双击“槽型深度宽度测量软件.exe”。
+          2. 点击“应用任务参数”。
+          3. 点击“选择原始图片目录”，可选择 181 帧或 301 帧图像数据。
+          4. 也可点击“导入点云文件”，直接读取对应 CSV 点云。
+          5. 测量完成后可生成 PDF 报告，并通过“打开输出结果”直接进入输出目录。
+
+          说明：演示数据用于验证软件流程和算法功能；实际计量精度需结合正式标定参数和参考样本复核。
+          "@ | Set-Content -Encoding UTF8 "$app/使用说明.txt"
+
+      - name: Verify package
+        shell: pwsh
+        run: |
+          $app = "dist/槽型深度宽度测量软件"
+          if (-not (Test-Path "$app/槽型深度宽度测量软件.exe")) { throw "EXE missing" }
+          if ((Get-ChildItem "$app/示例数据/01_原始图像_181帧_紧凑曲面V槽/frame_*.png").Count -ne 181) { throw "181 frames missing" }
+          if ((Get-ChildItem "$app/示例数据/02_原始图像_301帧_高密度紧凑曲面V槽/frame_*.png").Count -ne 301) { throw "301 frames missing" }
+
+      - name: Create ZIP
+        shell: pwsh
+        run: |
+          Compress-Archive -Path "dist/槽型深度宽度测量软件/*" -DestinationPath "groove-depth-width-v1.0.5-neutral-windows.zip" -CompressionLevel Optimal -Force
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: groove-depth-width-v1.0.5-neutral-windows
+          path: groove-depth-width-v1.0.5-neutral-windows.zip
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
+
+      - name: Publish fixed release asset
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "v1.0.5-neutral-20260819"
+          gh release delete $tag --cleanup-tag --yes 2>$null
+          gh release create $tag "groove-depth-width-v1.0.5-neutral-windows.zip" --title "v1.0.5 Windows Portable" --notes "Windows portable build with 181-frame and 301-frame curved V-groove datasets."
